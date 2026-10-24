@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable list depuis une IO list</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <span class="brand">Cable list builder</span>
+    <span class="top-note">Détection incendie · boucles adressables</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-text">
+        <h1>De l’IO list à la cable list, boucle par boucle</h1>
+        <p>Importe ton IO list. Chaque loop part du FACP, passe par ses appareils dans l’ordre de l’IO list et revient au FACP. Les détecteurs de flamme, pressostats et autres appareils sans adresse sont câblés depuis leur module.</p>
+      </div>
+
+      <figure class="loop-fig" aria-label="Schéma d’une boucle : le FACP, quatre appareils sur la boucle et une dérivation depuis le module MIO-01">
+        <svg viewBox="0 0 470 300" role="img" aria-hidden="true">
+          <path id="loop-path" class="wire" d="M60 150 V62 Q60 40 82 40 H338 Q360 40 360 62 V238 Q360 260 338 260 H82 Q60 260 60 238 Z"/>
+          <path class="pulse" pathLength="100" d="M60 150 V62 Q60 40 82 40 H338 Q360 40 360 62 V238 Q360 260 338 260 H82 Q60 260 60 238 Z"/>
+          <line class="wire spur" x1="360" y1="150" x2="426" y2="150"/>
+
+          <rect class="facp" x="40" y="130" width="40" height="40" rx="3"/>
+          <text class="lbl-facp" x="60" y="155" text-anchor="middle">FACP</text>
+
+          <circle class="node" cx="150" cy="40" r="9"/><text class="lbl" x="150" y="22" text-anchor="middle">MCP-01</text>
+          <circle class="node" cx="250" cy="40" r="9"/><text class="lbl" x="250" y="22" text-anchor="middle">SD-01</text>
+          <circle class="node mod" cx="360" cy="150" r="11"/><text class="lbl" x="346" y="132" text-anchor="end">MIO-01</text>
+          <circle class="node" cx="290" cy="260" r="9"/><text class="lbl" x="290" y="285" text-anchor="middle">SOA-01</text>
+          <circle class="node" cx="170" cy="260" r="9"/><text class="lbl" x="170" y="285" text-anchor="middle">ALM-01</text>
+          <rect class="node spur-node" x="418" y="142" width="16" height="16" transform="rotate(45 426 150)"/>
+          <text class="lbl" x="426" y="182" text-anchor="middle">FD-01</text>
+
+          <text class="lbl-loop" x="210" y="156" text-anchor="middle">L01</text>
+        </svg>
+      </figure>
+    </section>
+
+    <section class="stage" aria-labelledby="s1">
+      <h2 id="s1"><span class="num">1</span>Importer l’IO list</h2>
+      <div class="stage-body">
+        <label class="drop" id="drop" for="file">
+          <input type="file" id="file" accept=".xlsx">
+          <strong>Choisir un fichier .xlsx</strong>
+          <span>ou le déposer ici</span>
+          <em id="file-info">Aucun fichier importé</em>
+        </label>
+        <div class="field" id="sheet-row" hidden>
+          <label for="sheet">Feuille de l’IO list</label>
+          <select id="sheet"></select>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="stage" aria-labelledby="s2">
+      <h2 id="s2"><span class="num">2</span>Vérifier le résultat</h2>
+      <div class="stage-body">
+        <p id="empty" class="empty">Les boucles détectées, les points à vérifier et l’aperçu des câbles s’afficheront ici une fois l’IO list importée.</p>
+
+        <div id="results" hidden>
+          <div class="stats" id="stats"></div>
+
+          <table class="loops">
+            <caption>Câbles par loop</caption>
+            <thead><tr><th>Loop</th><th>Sur la boucle</th><th>Dérivations</th><th>Câbles (retour FACP inclus)</th></tr></thead>
+            <tbody id="loop-body"></tbody>
+          </table>
+
+          <div class="warn" id="warn-box" hidden>
+            <h3 id="warn-count"></h3>
+            <ul id="warn-list"></ul>
+          </div>
+
+          <details class="options">
+            <summary>Options de génération</summary>
+            <div class="opt-grid">
+              <div class="field">
+                <label for="opt-address">Colonne INDIRIZZO</label>
+                <select id="opt-address">
+                  <option value="io">Adresse de l’IO list</option>
+                  <option value="type">Code fixe par type d’appareil</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="opt-cable">Type de câble (colonne TIPO)</label>
+                <input id="opt-cable" type="text">
+              </div>
+              <div class="field">
+                <label for="opt-facp">Nom de la centrale</label>
+                <input id="opt-facp" type="text">
+              </div>
+              <div class="field">
+                <label for="opt-remove">Texte à retirer des descriptions</label>
+                <input id="opt-remove" type="text">
+              </div>
+              <div class="field">
+                <label for="opt-hubs">Préfixes concentrateurs</label>
+                <input id="opt-hubs" type="text">
+              </div>
+            </div>
+            <button type="button" class="link" id="opt-reset">Rétablir les valeurs par défaut</button>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage" aria-labelledby="s3">
+      <h2 id="s3"><span class="num">3</span>Télécharger la cable list</h2>
+      <div class="stage-body">
+        <button type="button" id="download" class="primary" disabled>Télécharger la cable list (.xlsx)</button>
+        <p class="hint">Les colonnes DA, A et ETICHETTA sont des formules Excel. Renseigne ensuite la longueur de chaque câble (cellules jaunes).</p>
+
+        <div class="table-wrap" id="preview-wrap">
+          <table class="preview">
+            <caption>Aperçu de la feuille EQUIPMENT</caption>
+            <thead><tr><th>N°</th><th>Appareil</th><th>Adresse</th><th>Câblé depuis</th><th>Description</th><th>Zone</th></tr></thead>
+            <tbody id="preview-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>Le fichier est traité dans ton navigateur : l’IO list n’est envoyée à aucun serveur.</footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
