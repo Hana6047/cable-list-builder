@@ -1,9 +1,10 @@
+```html
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cable list depuis une IO list</title>
+  <title>Cable List from an I/O List</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
@@ -11,18 +12,18 @@
 </head>
 <body>
   <header class="top">
-    <span class="brand">Cable list builder</span>
-    <span class="top-note">Détection incendie · boucles adressables</span>
+    <span class="brand">Cable List Builder</span>
+    <span class="top-note">Fire detection · Addressable loops</span>
   </header>
 
   <main>
     <section class="hero">
       <div class="hero-text">
-        <h1>De l’IO List à la Cable List</h1>
-        <p>Importez votre IO List et générez automatiquement votre Cable List. Chaque boucle part du FACP, suit l’ordre des équipements et revient au FACP. Les appareils non adressables sont raccordés via leurs modules.</p>
+        <h1>From I/O List to Cable List</h1>
+        <p>Import your I/O List and automatically generate your Cable List. Each loop starts at the FACP, follows the sequence of devices, and returns to the FACP. Non-addressable devices are connected through their modules.</p>
       </div>
 
-      <figure class="loop-fig" aria-label="Schéma d’une boucle : le FACP, quatre appareils sur la boucle et une dérivation depuis le module MIO-01">
+      <figure class="loop-fig" aria-label="Loop diagram: the FACP, four devices on the loop, and a branch from module MIO-01">
         <svg viewBox="0 0 470 300" role="img" aria-hidden="true">
           <path id="loop-path" class="wire" d="M60 150 V62 Q60 40 82 40 H338 Q360 40 360 62 V238 Q360 260 338 260 H82 Q60 260 60 238 Z"/>
           <path class="pulse" pathLength="100" d="M60 150 V62 Q60 40 82 40 H338 Q360 40 360 62 V238 Q360 260 338 260 H82 Q60 260 60 238 Z"/>
@@ -45,16 +46,16 @@
     </section>
 
     <section class="stage" aria-labelledby="s1">
-      <h2 id="s1"><span class="num">1</span>Importer l’IO list</h2>
+      <h2 id="s1"><span class="num">1</span> Import the I/O List</h2>
       <div class="stage-body">
         <label class="drop" id="drop" for="file">
           <input type="file" id="file" accept=".xlsx">
-          <strong>Choisir un fichier .xlsx</strong>
-          <span>ou le déposer ici</span>
-          <em id="file-info">Aucun fichier importé</em>
+          <strong>Choose an .xlsx file</strong>
+          <span>or drag and drop it here</span>
+          <em id="file-info">No file imported</em>
         </label>
         <div class="field" id="sheet-row" hidden>
-          <label for="sheet">Feuille de l’IO list</label>
+          <label for="sheet">I/O List worksheet</label>
           <select id="sheet"></select>
         </div>
         <p id="status" class="status" role="status" aria-live="polite"></p>
@@ -62,16 +63,16 @@
     </section>
 
     <section class="stage" aria-labelledby="s2">
-      <h2 id="s2"><span class="num">2</span>Vérifier le résultat</h2>
+      <h2 id="s2"><span class="num">2</span> Review the Results</h2>
       <div class="stage-body">
-        <p id="empty" class="empty">Les boucles détectées, les points à vérifier et l’aperçu des câbles s’afficheront ici une fois l’IO list importée.</p>
+        <p id="empty" class="empty">Detected loops, items requiring review, and the cable preview will appear here once the I/O List has been imported.</p>
 
         <div id="results" hidden>
           <div class="stats" id="stats"></div>
 
           <table class="loops">
-            <caption>Câbles par loop</caption>
-            <thead><tr><th>Loop</th><th>Sur la boucle</th><th>Dérivations</th><th>Câbles (retour FACP inclus)</th></tr></thead>
+            <caption>Cables per Loop</caption>
+            <thead><tr><th>Loop</th><th>On the Loop</th><th>Branches</th><th>Cables (including return to FACP)</th></tr></thead>
             <tbody id="loop-body"></tbody>
           </table>
 
@@ -81,48 +82,48 @@
           </div>
 
           <details class="options">
-            <summary>Options de génération</summary>
+            <summary>Generation Options</summary>
             <div class="opt-grid">
               <div class="field">
-                <label for="opt-address">Colonne INDIRIZZO</label>
+                <label for="opt-address">INDIRIZZO Column</label>
                 <select id="opt-address">
-                  <option value="io">Adresse de l’IO list</option>
-                  <option value="type">Code fixe par type d’appareil</option>
+                  <option value="io">Address from the I/O List</option>
+                  <option value="type">Fixed code by device type</option>
                 </select>
               </div>
               <div class="field">
-                <label for="opt-cable">Type de câble (colonne TIPO)</label>
+                <label for="opt-cable">Cable Type (TIPO Column)</label>
                 <input id="opt-cable" type="text">
               </div>
               <div class="field">
-                <label for="opt-facp">Nom de la centrale</label>
+                <label for="opt-facp">Control Panel Name</label>
                 <input id="opt-facp" type="text">
               </div>
               <div class="field">
-                <label for="opt-remove">Texte à retirer des descriptions</label>
+                <label for="opt-remove">Text to Remove from Descriptions</label>
                 <input id="opt-remove" type="text">
               </div>
               <div class="field">
-                <label for="opt-hubs">Préfixes concentrateurs</label>
+                <label for="opt-hubs">Hub Prefixes</label>
                 <input id="opt-hubs" type="text">
               </div>
             </div>
-            <button type="button" class="link" id="opt-reset">Rétablir les valeurs par défaut</button>
+            <button type="button" class="link" id="opt-reset">Restore Default Values</button>
           </details>
         </div>
       </div>
     </section>
 
     <section class="stage" aria-labelledby="s3">
-      <h2 id="s3"><span class="num">3</span>Télécharger la cable list</h2>
+      <h2 id="s3"><span class="num">3</span> Download the Cable List</h2>
       <div class="stage-body">
-        <button type="button" id="download" class="primary" disabled>Télécharger la cable list (.xlsx)</button>
-        <p class="hint">Les colonnes DA, A et ETICHETTA sont des formules Excel. Renseigne ensuite la longueur de chaque câble (cellules jaunes).</p>
+        <button type="button" id="download" class="primary" disabled>Download the Cable List (.xlsx)</button>
+        <p class="hint">The DA, A, and ETICHETTA columns contain Excel formulas. Then enter the length of each cable (yellow cells).</p>
 
         <div class="table-wrap" id="preview-wrap">
           <table class="preview">
-            <caption>Aperçu de la feuille EQUIPMENT</caption>
-            <thead><tr><th>N°</th><th>Appareil</th><th>Adresse</th><th>Câblé depuis</th><th>Description</th><th>Zone</th></tr></thead>
+            <caption>EQUIPMENT Worksheet Preview</caption>
+            <thead><tr><th>No.</th><th>Device</th><th>Address</th><th>Cabled From</th><th>Description</th><th>Zone</th></tr></thead>
             <tbody id="preview-body"></tbody>
           </table>
         </div>
@@ -130,9 +131,10 @@
     </section>
   </main>
 
-  <footer>Le fichier est traité dans ton navigateur : l’IO list n’est envoyée à aucun serveur.</footer>
+  <footer>The file is processed in your browser: the I/O List is never uploaded to any server.</footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
+```
