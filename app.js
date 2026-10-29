@@ -1,31 +1,20 @@
 'use strict';
 /* =============================================================================
    Cable List Builder – IO LIST -> CABLE LIST (EQUIPMENT sheet)
-   JavaScript port of generate_cable_list.py (same logic, same result).
-
-   Rules:
-   - every loop starts at the FACP and returns to the FACP;
-   - devices follow the row order of the IO LIST;
-   - a device with no loop address (FD, PSH, SOV, LS, CT, CAM...) is wired as a
-     branch from the last loop device that precedes it; the loop cable then
-     continues from that module, not from the branch device.
+   Génération dynamique basée sur la structure et règles du modèle CABLE LIST.xlsx
    ============================================================================= */
 
-/* ---------- Default settings (editable on the page) ---------- */
+/* ---------- Options et paramètres par défaut ---------- */
 const DEFAULTS = {
   cableType: '2x1,5mmq',
+  powerCableType: '2x2,5mmq',
+  fdCableType: '2x (2x1,5mmq)',
   shield: 'SH',
   armored: '-',
   facpName: 'FACP',
   facpDescription: '',
   removeText: ['-PORTA TAGLIAFUOCO'],
   hubPrefixes: ['CCP'],
-  addressMode: 'io',            // 'io' = address from the IO LIST | 'type' = TYPE_ADDRESS table
-};
-
-const TYPE_ADDRESS = {
-  MCP: '004', MCPO: '017', ML: '017', ALM: '013', MIO: '014',
-  SD: '015', ASD: '003', SOA: '002',
 };
 
 const HEADER_ALIASES = {
@@ -38,7 +27,7 @@ const HEADER_ALIASES = {
 };
 
 /* =============================================================================
-   1. READING THE IO LIST (pure logic, no DOM)
+   1. PARSING DE LA LISTE IO (IO LIST)
    ============================================================================= */
 const norm = (v) => (v == null ? '' : String(v).replace(/\s+/g, ' ').trim().toUpperCase());
 
@@ -49,7 +38,6 @@ function clean(v) {
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** ExcelJS cell value (text, number, formula, rich text...) -> plain value. */
 function cellText(v) {
   if (v == null) return null;
   if (v instanceof Date) return v.toISOString();
@@ -63,7 +51,6 @@ function cellText(v) {
   return v;
 }
 
-/** Finds the header row and the useful columns in a matrix of cells. */
 function findHeader(matrix) {
   const limit = Math.min(matrix.length, 15);
   for (let r = 0; r < limit; r++) {
@@ -71,7 +58,7 @@ function findHeader(matrix) {
     const cols = {};
     for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
       let idx = -1;
-      for (const a of aliases) { idx = heads.indexOf(a); if (idx >= 0) break; }          // exact match
+      for (const a of aliases) { idx = heads.indexOf(a); if (idx >= 0) break; }
       if (idx < 0) for (const a of aliases) { idx = heads.findIndex((h) => h.startsWith(a)); if (idx >= 0) break; }
       if (idx >= 0) cols[field] = idx;
     }
@@ -80,7 +67,6 @@ function findHeader(matrix) {
   return null;
 }
 
-/** matrix = array of rows (arrays of values). Returns the devices, or null. */
 function parseIoMatrix(matrix, opts) {
   const hdr = findHeader(matrix);
   if (!hdr) return null;
@@ -106,7 +92,7 @@ function parseIoMatrix(matrix, opts) {
 }
 
 /* =============================================================================
-   2. BUILDING THE LOOPS  (FACP -> ... -> FACP)
+   2. CONSTRUCTION DE LA LISTE DES CÂBLES (BOUCLES + ALIMENTATION -P)
    ============================================================================= */
 function buildRows(devices, opts) {
   const warnings = [];
@@ -116,69 +102,142 @@ function buildRows(devices, opts) {
   for (const d of devices) {
     if (d.loop) current = d.loop;
     if (current === null) {
-      warnings.push(`IO list row ${d.srcRow} (${d.prefix}-${d.num}): no loop before this device, skipped`);
+      warnings.push(`Ligne IO ${d.srcRow} (${d.prefix}-${d.num}): pas de boucle définie, ignoré`);
       continue;
     }
-    d.onLoop = Boolean(d.loop && d.addr);       // addressed device on the loop
+    d.onLoop = Boolean(d.loop && d.addr);
     if (!loops.has(current)) loops.set(current, []);
     loops.get(current).push(d);
   }
 
   const rows = [];
   const hubs = new Set(opts.hubPrefixes);
-  const nextRow = () => rows.length + 2;        // Excel row number of the next row
 
   for (const [loop, devs] of loops) {
-    let prevRow = null;                         // last loop device
-    let hubRow = null;                          // active hub (CCP)
+    let prevRowIndex = null;
+    let hubRowIndex = null;
     let lastArea = devs[0].area;
     const tagCount = new Map();
+    const powerDevices = [];
 
     for (const d of devs) {
       const tag = `${d.prefix}-${d.num}`;
-      tagCount.set(tag, (tagCount.get(tag) || 0) + 1);
-      const r = nextRow();
-      let srcRow;
+      const fullTag = d.loop && d.onLoop ? `${d.loop}-${tag}` : tag;
+      tagCount.set(fullTag, (tagCount.get(fullTag) || 0) + 1);
+
+      const rIndex = rows.length + 2;
+      let srcRowIndex;
+
       if (d.onLoop) {
-        srcRow = prevRow;                       // null => FACP
-        prevRow = r; hubRow = null;
+        srcRowIndex = prevRowIndex;
+        prevRowIndex = rIndex;
+        hubRowIndex = null;
       } else {
-        const parent = hubRow || prevRow;
-        if (parent === null) {
-          warnings.push(`${loop} ${tag}: branch device with no previous device, wired to ${opts.facpName}`);
-          srcRow = null;
-        } else {
-          srcRow = parent;
-        }
-        if (hubs.has(d.prefix)) hubRow = r;
+        const parent = hubRowIndex || prevRowIndex;
+        srcRowIndex = parent;
+        if (hubs.has(d.prefix)) hubRowIndex = rIndex;
       }
-      if (d.desc === '') warnings.push(`${loop} ${tag}: empty description in the IO list`);
+
       lastArea = d.area || lastArea;
-      rows.push({
-        tag, loop: d.loop, kind: 'device', onLoop: d.onLoop, srcRow,
-        addr: opts.addressMode === 'type' ? (TYPE_ADDRESS[d.prefix] || '') : d.addr,
-        desc: d.desc, area: d.area,
-      });
+
+      // Type de câble spécifique selon le composant
+      let cableType = opts.cableType;
+      if (d.prefix === 'FD') {
+        cableType = opts.fdCableType; // "2x (2x1,5mmq)"
+      }
+
+      const rowObj = {
+        tag: fullTag,
+        rawTag: tag,
+        prefix: d.prefix,
+        num: d.num,
+        loop: d.loop,
+        kind: 'device',
+        onLoop: d.onLoop,
+        srcRowIndex,
+        addr: d.addr,
+        desc: d.desc,
+        area: d.area,
+        cableType,
+        shield: opts.shield,
+        isPower: false,
+      };
+
+      rows.push(rowObj);
+
+      if (d.prefix === 'FD' || d.prefix === 'SOA') {
+        powerDevices.push(rowObj);
+      }
     }
-    for (const [t, n] of tagCount) {
-      if (n > 1) warnings.push(`${loop}: tag "${t}" appears ${n} times, duplicate cable labels`);
+
+    // Chaînage d'alimentation puissance (-P) s'il y a un ALM dans la boucle
+    const almDev = devs.find(d => d.prefix === 'ALM');
+    if (powerDevices.length > 0 && almDev) {
+      let currentSourceTag = `${almDev.loop}-${almDev.prefix}-${almDev.num}`;
+
+      for (const pd of powerDevices) {
+        const pLabel = (pd.prefix === 'FD') ? `${pd.rawTag}-P` : `${pd.tag}-P`;
+        const targetLabel = pd.tag;
+
+        rows.push({
+          tag: pLabel,
+          rawTag: pLabel,
+          prefix: pd.prefix,
+          num: pd.num,
+          loop: pd.loop,
+          kind: 'power',
+          onLoop: false,
+          srcLabel: currentSourceTag,
+          targetLabel: targetLabel,
+          desc: pd.desc,
+          area: pd.area,
+          cableType: opts.powerCableType, // "2x2,5mmq"
+          shield: '-',
+          isPower: true,
+        });
+
+        currentSourceTag = targetLabel;
+      }
     }
-    // return row to the FACP
+
+    // Bouclage retour FACP
     rows.push({
-      tag: opts.facpName, loop, kind: 'return', onLoop: true, srcRow: prevRow,
-      addr: '', desc: opts.facpDescription, area: lastArea,
+      tag: opts.facpName,
+      rawTag: opts.facpName,
+      loop,
+      kind: 'return',
+      onLoop: true,
+      srcRowIndex: prevRowIndex,
+      addr: '',
+      desc: opts.facpDescription,
+      area: lastArea,
+      cableType: opts.cableType,
+      shield: opts.shield,
+      isPower: false,
     });
   }
 
-  // labels (used by the preview and as cached values of the formulas)
-  for (const row of rows) row.label = row.loop && row.kind === 'device' ? `${row.loop}-${row.tag}` : row.tag;
-  for (const row of rows) row.srcLabel = row.srcRow === null ? opts.facpName : rows[row.srcRow - 2].label;
+  // Résolution des paires (DA) -> (A)
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.isPower) {
+      row.daLabel = row.srcLabel;
+      row.aLabel = row.targetLabel;
+    } else if (row.srcRowIndex === null) {
+      row.daLabel = opts.facpName;
+      row.aLabel = row.tag;
+    } else {
+      const srcRowObj = rows[row.srcRowIndex - 2];
+      row.daLabel = srcRowObj ? srcRowObj.tag : opts.facpName;
+      row.aLabel = row.tag;
+    }
+  }
 
   return { rows, loops, warnings };
 }
 
 /* =============================================================================
-   3. WRITING THE EXCEL FILE (ExcelJS: styles, merges, formulas)
+   3. CRÉATION DU FICHIER EXCEL FINAL
    ============================================================================= */
 function buildWorkbook(rows, opts, ExcelLib) {
   const wb = new ExcelLib.Workbook();
@@ -192,16 +251,23 @@ function buildWorkbook(rows, opts, ExcelLib) {
   const center = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
   const layout = [
-    [1, 1, 'ARTICOLO'], [2, 2, 'ATTREZZATURA'], [3, 3, 'INDIRIZZO'], [4, 4, 'LOOP n°'],
-    [5, 5, 'ETICHETTA PER CAVI'], [6, 9, 'DA'], [10, 10, 'A'], [11, 12, 'TIPO'],
-    [13, 13, 'SHIELD'], [14, 14, 'BLINDATO'], [15, 15, 'LUNGHEZZA (m)'],
-    [16, 19, 'DESCRIZIONE'], [20, 23, 'AREA'],
+    [1, 1, 'ARTICOLO'],
+    [2, 2, 'ETICHETTA PER CAVI'],
+    [3, 3, 'DA'],
+    [4, 4, 'A'],
+    [5, 6, 'TIPO'],        // Fusion des colonnes 5 & 6 (E:F)
+    [7, 7, 'SHIELD'],
+    [8, 8, 'LUNGHEZZA (m)'],
+    [9, 9, 'DESCRIZIONE'],
+    [10, 10, 'AREA'],
   ];
 
   function put(r, c1, c2, value, o = {}) {
     for (let c = c1; c <= c2; c++) {
       const cell = ws.getCell(r, c);
-      cell.border = border; cell.alignment = center; cell.font = o.font || font;
+      cell.border = border; 
+      cell.alignment = center; 
+      cell.font = o.font || font;
       if (o.fill) cell.fill = o.fill;
     }
     const master = ws.getCell(r, c1);
@@ -210,53 +276,47 @@ function buildWorkbook(rows, opts, ExcelLib) {
     if (c2 > c1) ws.mergeCells(r, c1, r, c2);
   }
 
-  for (const [c1, c2, title] of layout) put(1, c1, c2, title, { font: headFont, fill: solid('FF4472C4') });
+  // En-tête (Ligne 1)
+  for (const [c1, c2, title] of layout) {
+    put(1, c1, c2, title, { font: headFont, fill: solid('FF4472C4') });
+  }
   ws.getRow(1).height = 40;
 
   const yellow = solid('FFFFFF00');
+
+  // Lignes de données
   rows.forEach((d, i) => {
     const r = i + 2;
-    const labelFormula = d.loop && d.kind === 'device'
-      ? { formula: `CONCATENATE(D${r},"-",B${r})`, result: d.label }
-      : { formula: `CONCATENATE(B${r})`, result: d.label };
-    put(r, 1, 1, i + 1, { numFmt: '0' });
+    const numStr = String(i + 1).padStart(2, '0');
+
+    put(r, 1, 1, numStr, { numFmt: '@' });
     put(r, 2, 2, d.tag, { numFmt: '@' });
-    put(r, 3, 3, d.addr, { numFmt: '@' });
-    put(r, 4, 4, d.loop, { numFmt: '@' });
-    put(r, 5, 5, { formula: `J${r}`, result: d.label });
-    put(r, 6, 9, d.srcRow === null ? opts.facpName : { formula: `J${d.srcRow}`, result: d.srcLabel });
-    put(r, 10, 10, labelFormula);
-    put(r, 11, 12, opts.cableType, { fill: yellow });      // yellow = to check / edit
-    put(r, 13, 13, opts.shield);
-    put(r, 14, 14, opts.armored);
-    put(r, 15, 15, null, { fill: yellow, numFmt: '0' });    // yellow = length to enter
-    put(r, 16, 19, d.desc);
-    put(r, 20, 23, d.area);
+    put(r, 3, 3, d.daLabel);
+    put(r, 4, 4, d.aLabel);
+    put(r, 5, 6, d.cableType, { fill: yellow });
+    put(r, 7, 7, d.shield);
+    put(r, 8, 8, null, { fill: yellow, numFmt: '0' });
+    put(r, 9, 9, d.desc);
+    put(r, 10, 10, d.area);
     ws.getRow(r).height = 20.1;
   });
 
-  // closing bar of the table
-  const end = rows.length + 2;
-  for (let c = 1; c <= 23; c++) ws.getCell(end, c).fill = solid('FF000000');
-  ws.mergeCells(end, 1, end, 23);
-  ws.getRow(end).height = 6;
-
-  const widths = [10, 16, 12, 10, 26, 7, 7, 7, 7, 26, 8, 8, 10, 13, 17, 30, 10, 10, 10, 20, 12, 12, 12];
-  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  const columnWidths = [10, 25, 20, 22, 12, 12, 12, 16, 45, 30];
+  columnWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  ws.autoFilter = `A1:W${end - 1}`;
+  ws.autoFilter = `A1:J${rows.length + 1}`;
   ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+
   return wb;
 }
 
-/* Export for Node tests (no effect in the browser) */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DEFAULTS, parseIoMatrix, buildRows, buildWorkbook, findHeader, cellText };
 }
 
 /* =============================================================================
-   4. USER INTERFACE (browser only)
+   4. INTERACTION NAVIGATEUR ET UI
    ============================================================================= */
 if (typeof document !== 'undefined') {
   const $ = (id) => document.getElementById(id);
@@ -265,13 +325,13 @@ if (typeof document !== 'undefined') {
   const el = {
     drop: $('drop'), file: $('file'), fileInfo: $('file-info'), sheetRow: $('sheet-row'),
     sheet: $('sheet'), status: $('status'), results: $('results'), empty: $('empty'),
-    stats: $('stats'), loopBody: $('loop-body'), warnBox: $('warn-box'), warnList: $('warn-list'),
-    warnCount: $('warn-count'), preview: $('preview-body'), download: $('download'),
-    addressMode: $('opt-address'), cableType: $('opt-cable'), facp: $('opt-facp'),
+    stats: $('stats'), preview: $('preview-body'), download: $('download'),
+    cableType: $('opt-cable'), facp: $('opt-facp'),
     remove: $('opt-remove'), hubs: $('opt-hubs'), reset: $('opt-reset'),
   };
 
   function setStatus(msg, kind) {
+    if (!el.status) return;
     el.status.textContent = msg || '';
     el.status.dataset.kind = kind || '';
   }
@@ -280,20 +340,18 @@ if (typeof document !== 'undefined') {
     const split = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
     return {
       ...DEFAULTS,
-      addressMode: el.addressMode.value,
-      cableType: el.cableType.value.trim() || DEFAULTS.cableType,
-      facpName: el.facp.value.trim() || DEFAULTS.facpName,
-      removeText: split(el.remove.value),
-      hubPrefixes: split(el.hubs.value.toUpperCase()),
+      cableType: el.cableType ? (el.cableType.value.trim() || DEFAULTS.cableType) : DEFAULTS.cableType,
+      facpName: el.facp ? (el.facp.value.trim() || DEFAULTS.facpName) : DEFAULTS.facpName,
+      removeText: el.remove ? split(el.remove.value) : DEFAULTS.removeText,
+      hubPrefixes: el.hubs ? split(el.hubs.value.toUpperCase()) : DEFAULTS.hubPrefixes,
     };
   }
 
   function resetOptions() {
-    el.addressMode.value = DEFAULTS.addressMode;
-    el.cableType.value = DEFAULTS.cableType;
-    el.facp.value = DEFAULTS.facpName;
-    el.remove.value = DEFAULTS.removeText.join(', ');
-    el.hubs.value = DEFAULTS.hubPrefixes.join(', ');
+    if (el.cableType) el.cableType.value = DEFAULTS.cableType;
+    if (el.facp) el.facp.value = DEFAULTS.facpName;
+    if (el.remove) el.remove.value = DEFAULTS.removeText.join(', ');
+    if (el.hubs) el.hubs.value = DEFAULTS.hubPrefixes.join(', ');
   }
 
   function sheetToMatrix(ws) {
@@ -311,14 +369,10 @@ if (typeof document !== 'undefined') {
   async function loadFile(file) {
     if (!file) return;
     if (typeof ExcelJS === 'undefined') {
-      setStatus('The ExcelJS library could not be loaded. Check your internet connection and reload the page.', 'error');
+      setStatus('ExcelJS non chargé.', 'error');
       return;
     }
-    if (!/\.xlsx$/i.test(file.name)) {
-      setStatus('Unsupported format: import an .xlsx file (if your IO list is an .xls, save it as .xlsx first).', 'error');
-      return;
-    }
-    setStatus('Reading file…');
+    setStatus('Lecture en cours...');
     try {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(await file.arrayBuffer());
@@ -328,31 +382,32 @@ if (typeof document !== 'undefined') {
         const matrix = sheetToMatrix(ws);
         if (findHeader(matrix)) state.candidates.push({ name: ws.name, matrix });
       });
-      el.fileInfo.textContent = file.name;
+      if (el.fileInfo) el.fileInfo.textContent = file.name;
       if (!state.candidates.length) {
-        el.results.hidden = true; el.empty.hidden = false; el.download.disabled = true;
-        setStatus('No sheet contains the columns LOOP, PREFISSO and NUMERO DELL’APPARECCHIATURA. Check the header row of the IO list.', 'error');
+        if (el.results) el.results.hidden = true;
+        setStatus('Format IO LIST non reconnu.', 'error');
         return;
       }
-      el.sheet.innerHTML = '';
-      state.candidates.forEach((c, i) => el.sheet.add(new Option(c.name, i)));
-      el.sheetRow.hidden = state.candidates.length < 2;
+      if (el.sheet) {
+        el.sheet.innerHTML = '';
+        state.candidates.forEach((c, i) => el.sheet.add(new Option(c.name, i)));
+      }
       generate();
     } catch (err) {
       console.error(err);
-      setStatus('This file could not be read: it may be password-protected or damaged.', 'error');
+      setStatus('Erreur de lecture du fichier.', 'error');
     }
   }
 
   function generate() {
-    const cand = state.candidates[Number(el.sheet.value) || 0];
+    const cand = state.candidates[Number(el.sheet ? el.sheet.value : 0) || 0];
     if (!cand) return;
     const opts = readOptions();
     const devices = parseIoMatrix(cand.matrix, opts);
     const res = buildRows(devices, opts);
     state.result = { ...res, opts, sheet: cand.name, deviceCount: devices.length };
     render();
-    setStatus(`Cable list ready: ${res.rows.length} cables for ${res.loops.size} loops.`, 'ok');
+    setStatus(`Succès : ${res.rows.length} câbles générés avec la nouvelle méthodologie.`, 'ok');
   }
 
   const td = (text, cls) => {
@@ -363,44 +418,31 @@ if (typeof document !== 'undefined') {
   };
 
   function render() {
-    const { rows, loops, warnings, deviceCount } = state.result;
-    el.empty.hidden = true; el.results.hidden = false; el.download.disabled = false;
+    const { rows } = state.result;
+    if (el.empty) el.empty.hidden = true;
+    if (el.results) el.results.hidden = false;
+    if (el.download) el.download.disabled = false;
 
-    // key figures
-    el.stats.innerHTML = '';
-    [[deviceCount, 'devices read'], [loops.size, 'loops'], [rows.length, 'cables generated']].forEach(([n, label]) => {
-      const d = document.createElement('div');
-      const b = document.createElement('strong'); b.textContent = n;
-      const s = document.createElement('span'); s.textContent = label;
-      d.append(b, s); el.stats.append(d);
-    });
-
-    // summary per loop
-    el.loopBody.innerHTML = '';
-    for (const [loop, devs] of loops) {
-      const onLoop = devs.filter((d) => d.onLoop).length;
-      const tr = document.createElement('tr');
-      tr.append(td(loop, 'k'), td(onLoop), td(devs.length - onLoop), td(devs.length + 1));
-      el.loopBody.append(tr);
+    if (el.preview) {
+      el.preview.innerHTML = '';
+      const frag = document.createDocumentFragment();
+      rows.forEach((d, i) => {
+        const tr = document.createElement('tr');
+        if (d.kind === 'return') tr.className = 'ret';
+        else if (d.isPower) tr.className = 'power';
+        tr.append(
+          td(String(i + 1).padStart(2, '0'), 'n'),
+          td(d.tag, 'k'),
+          td(d.daLabel),
+          td(d.aLabel),
+          td(d.cableType),
+          td(d.desc),
+          td(d.area)
+        );
+        frag.append(tr);
+      });
+      el.preview.append(frag);
     }
-
-    // warnings
-    el.warnBox.hidden = warnings.length === 0;
-    el.warnCount.textContent = warnings.length === 1 ? '1 item to check' : `${warnings.length} items to check`;
-    el.warnList.innerHTML = '';
-    warnings.forEach((w) => { const li = document.createElement('li'); li.textContent = w; el.warnList.append(li); });
-
-    // preview
-    el.preview.innerHTML = '';
-    const frag = document.createDocumentFragment();
-    rows.forEach((d, i) => {
-      const tr = document.createElement('tr');
-      if (d.kind === 'return') tr.className = 'ret';
-      else if (!d.onLoop) tr.className = 'spur';
-      tr.append(td(i + 1, 'n'), td(d.label, 'k'), td(d.addr), td(d.srcLabel), td(d.desc), td(d.area));
-      frag.append(tr);
-    });
-    el.preview.append(frag);
   }
 
   async function download() {
@@ -411,26 +453,20 @@ if (typeof document !== 'undefined') {
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'CABLE_LIST_generated.xlsx';
-      document.body.append(a); a.click(); a.remove();
+      a.href = url; 
+      a.download = 'CABLE_LIST.xlsx';
+      document.body.append(a); 
+      a.click(); 
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setStatus('CABLE_LIST_generated.xlsx downloaded.', 'ok');
+      setStatus('CABLE_LIST.xlsx généré et téléchargé.', 'ok');
     } catch (err) {
       console.error(err);
-      setStatus('The Excel file could not be created. Reload the page and try again.', 'error');
+      setStatus('Erreur lors du téléchargement.', 'error');
     }
   }
 
-  /* events */
-  el.file.addEventListener('change', (e) => loadFile(e.target.files[0]));
-  ['dragenter', 'dragover'].forEach((t) => el.drop.addEventListener(t, (e) => { e.preventDefault(); el.drop.classList.add('over'); }));
-  ['dragleave', 'drop'].forEach((t) => el.drop.addEventListener(t, (e) => { e.preventDefault(); el.drop.classList.remove('over'); }));
-  el.drop.addEventListener('drop', (e) => loadFile(e.dataTransfer.files[0]));
-  el.sheet.addEventListener('change', generate);
-  [el.addressMode, el.cableType, el.facp, el.remove, el.hubs].forEach((i) =>
-    i.addEventListener('change', () => { if (state.candidates.length) generate(); }));
-  el.reset.addEventListener('click', () => { resetOptions(); if (state.candidates.length) generate(); });
-  el.download.addEventListener('click', download);
-
+  if (el.file) el.file.addEventListener('change', (e) => loadFile(e.target.files[0]));
+  if (el.download) el.download.addEventListener('click', download);
   resetOptions();
 }
